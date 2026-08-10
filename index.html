@@ -114,23 +114,35 @@
   .challenge input[type=text] { width: 100%; border: none; border-bottom: 1px dashed var(--line); font-family: inherit; font-size: 13px; padding: 6px 0; background: none; color: var(--ink); margin: 4px 0 9px; }
   .challenge input:focus { outline: none; border-bottom-color: var(--signal); }
 
-  .sched { padding: 4px 6px; }
-  .schedrow {
-    width: 100%; display: flex; justify-content: space-between; align-items: center;
-    background: none; border: none; border-bottom: 1px solid var(--line);
-    padding: 12px 6px; font-family: inherit; cursor: pointer; color: var(--ink);
+  .sched { padding: 6px 10px 10px; }
+  .schedhead, .schedrow {
+    display: grid; grid-template-columns: 1fr 72px 72px; gap: 6px; align-items: center;
   }
-  .sched .schedrow:last-child { border-bottom: none; }
-  .schedday { font-size: 14px; font-weight: 500; }
-  .schedtype {
-    font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
-    padding: 4px 10px; border-radius: 20px; border: 1px solid var(--line); color: var(--muted);
+  .schedhead { padding: 2px 0 6px; }
+  .schedwho {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .schedrow.course .schedtype { background: var(--a); border-color: var(--a); color: #fff; }
-  .schedrow.recup .schedtype { background: #E7F0EC; border-color: #BBD3C8; color: #2F5E4E; }
-  .schedrow.repos .schedtype { background: none; }
-  .schedrow:active { background: #F5F7F3; }
-  .schedrow:focus-visible { outline: 2px solid var(--signal); outline-offset: -2px; }
+  .schedrow { border-top: 1px solid var(--line); padding: 7px 0; }
+  .schedday { font-size: 13.5px; font-weight: 500; }
+  button.schedtype {
+    font-family: inherit; font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+    text-transform: uppercase; padding: 8px 4px; border-radius: 20px;
+    border: 1px solid var(--line); background: none; color: var(--muted); cursor: pointer;
+  }
+  button.schedtype.course { background: var(--a); border-color: var(--a); color: #fff; }
+  button.schedtype.recup { background: #E7F0EC; border-color: #BBD3C8; color: #2F5E4E; }
+  button.schedtype:active { transform: scale(0.95); }
+  button.schedtype:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+  .cardtype {
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 3px 8px; border-radius: 20px; border: 1px solid var(--line); color: var(--muted);
+    white-space: nowrap; flex: none;
+  }
+  .cardtype.course { background: #E7F0EC; border-color: #BBD3C8; color: #235B4B; }
+  .cardtype.repos { opacity: 0.65; }
+  .mark.repos { background: none; border-top: 1px dashed #C9D2CB; height: 0; border-radius: 0; }
 
   #diag {
     white-space: pre-wrap; word-break: break-word; margin: 10px 0 0;
@@ -173,6 +185,15 @@ var ROW_ID       = "adelie-alex-64";    // ex. "adelie-alex-7fq2" (inventez-le)
   "use strict";
 
   var TABLE = "tableau";
+
+  // tolère une adresse copiée avec /rest/v1 au bout, ou des espaces
+  SUPABASE_URL = String(SUPABASE_URL).trim()
+    .replace(/\/+$/, "")
+    .replace(/\/rest\/v1$/i, "")
+    .replace(/\/+$/, "");
+  SUPABASE_KEY = String(SUPABASE_KEY).trim();
+  ROW_ID = String(ROW_ID).trim();
+
   var CONFIGURED = SUPABASE_URL.indexOf("http") === 0 && SUPABASE_KEY.length > 20;
 
   // Calendrier par défaut, modifiable dans la page (index 0 = dimanche)
@@ -207,8 +228,17 @@ var ROW_ID       = "adelie-alex-64";    // ex. "adelie-alex-7fq2" (inventez-le)
       names: { a: "Adélie", b: "Alexandre" },
       days: {},
       challenge: {},
-      schedule: DEFAULT_SCHEDULE.slice()
+      schedule: { a: DEFAULT_SCHEDULE.slice(), b: DEFAULT_SCHEDULE.slice() }
     };
+  }
+
+  function validSchedule(arr) {
+    if (!Array.isArray(arr) || arr.length !== 7) return DEFAULT_SCHEDULE.slice();
+    var out = [];
+    for (var i = 0; i < 7; i++) {
+      out[i] = CYCLE.indexOf(arr[i]) === -1 ? DEFAULT_SCHEDULE[i] : arr[i];
+    }
+    return out;
   }
 
   function normalise(s) {
@@ -216,18 +246,23 @@ var ROW_ID       = "adelie-alex-64";    // ex. "adelie-alex-7fq2" (inventez-le)
     if (!s.names) s.names = { a: "Adélie", b: "Alexandre" };
     if (!s.days) s.days = {};
     if (!s.challenge) s.challenge = {};
-    if (!Array.isArray(s.schedule) || s.schedule.length !== 7) s.schedule = DEFAULT_SCHEDULE.slice();
-    for (var i = 0; i < 7; i++) {
-      if (CYCLE.indexOf(s.schedule[i]) === -1) s.schedule[i] = DEFAULT_SCHEDULE[i];
+
+    // ancien format : un seul calendrier commun
+    if (Array.isArray(s.schedule)) {
+      var shared = validSchedule(s.schedule);
+      s.schedule = { a: shared, b: shared.slice() };
     }
+    if (!s.schedule || typeof s.schedule !== "object") s.schedule = {};
+    s.schedule.a = validSchedule(s.schedule.a);
+    s.schedule.b = validSchedule(s.schedule.b);
     return s;
   }
 
-  // type d'un jour de la semaine (0 = dimanche)
-  function typeOf(s, wd) { return s.schedule[wd]; }
-  function activeDays(s) {
+  // type d'un jour pour une personne (wd : 0 = dimanche)
+  function typeOf(s, who, wd) { return s.schedule[who][wd]; }
+  function activeDays(s, who) {
     var n = 0;
-    for (var i = 0; i < 7; i++) if (s.schedule[i] !== "repos") n++;
+    for (var i = 0; i < 7; i++) if (s.schedule[who][i] !== "repos") n++;
     return n;
   }
 
@@ -416,12 +451,12 @@ var ROW_ID       = "adelie-alex-64";    // ex. "adelie-alex-7fq2" (inventez-le)
     return 0;
   }
   function total(s, who) {
-    var sum = 0, weeks = {}, target = activeDays(s);
+    var sum = 0, weeks = {}, target = activeDays(s, who);
     Object.keys(s.days).forEach(function (k) {
       var e = entry(s, k, who);
       sum += dayPoints(e);
       var d = parseKey(k);
-      if (typeOf(s, d.getDay()) !== "repos") {
+      if (typeOf(s, who, d.getDay()) !== "repos") {
         var wk = weekKeyOf(d);
         if (!weeks[wk]) weeks[wk] = 0;
         if (e.status === "fait") weeks[wk]++;
@@ -454,7 +489,7 @@ var ROW_ID       = "adelie-alex-64";    // ex. "adelie-alex-7fq2" (inventez-le)
     var mon = mondayOf(d), n = 0;
     for (var i = 0; i < 7; i++) {
       var day = addDays(mon, i);
-      if (typeOf(s, day.getDay()) === "repos") continue;
+      if (typeOf(s, who, day.getDay()) === "repos") continue;
       if (entry(s, key(day), who).status === "fait") n++;
     }
     return n;
@@ -502,15 +537,15 @@ var ROW_ID       = "adelie-alex-64";    // ex. "adelie-alex-7fq2" (inventez-le)
       s.challenge[mk].text = txt;
     });
   }
-  function cycleDay(wd) {
+  function cycleDay(who, wd) {
     mutate(function (s) {
-      var i = CYCLE.indexOf(s.schedule[wd]);
+      var i = CYCLE.indexOf(s.schedule[who][wd]);
       var next = CYCLE[(i + 1) % CYCLE.length];
-      if (next === "repos" && activeDays(s) <= 1) {
+      if (next === "repos" && activeDays(s, who) <= 1) {
         toast("Il faut garder au moins un jour actif dans la semaine.");
         return;
       }
-      s.schedule[wd] = next;
+      s.schedule[who][wd] = next;
     });
   }
 
@@ -541,7 +576,7 @@ var ROW_ID       = "adelie-alex-64";    // ex. "adelie-alex-7fq2" (inventez-le)
   }
 
   function personCard(who) {
-    var k = key(viewDate), e = entry(state, k, who), type = typeOf(state, viewDate.getDay());
+    var k = key(viewDate), e = entry(state, k, who), type = typeOf(state, who, viewDate.getDay());
     var col = who === "a" ? "var(--a)" : "var(--b)";
     var pb = who === "b" ? " pb" : "";
     var pts = dayPoints(e);
@@ -551,7 +586,8 @@ var ROW_ID       = "adelie-alex-64";    // ex. "adelie-alex-7fq2" (inventez-le)
     var h = '<div class="card"><div class="card-head"><div class="who">';
     h += '<span class="dot" style="background:' + col + '"></span>';
     h += '<input class="whoname" data-name="' + who + '" value="' + esc(state.names[who]) + '" aria-label="Nom">';
-    h += '</div><span class="num daypts" style="color:' + pcol + '">' + txt + '</span></div>';
+    h += '</div><span class="cardtype ' + type + '">' + TYPELONG[type] + '</span>';
+    h += '<span class="num daypts" style="color:' + pcol + '">' + txt + '</span></div>';
 
     if (type === "repos") {
       return h + '<div class="rest">Jour de repos. Rien à cocher, c\'est le programme.</div></div>';
@@ -583,11 +619,12 @@ var ROW_ID       = "adelie-alex-64";    // ex. "adelie-alex-7fq2" (inventez-le)
   function weekStrip() {
     var mon = mondayOf(viewDate), today = new Date(), h = '<div class="week">';
     for (var i = 0; i < 7; i++) {
-      var d = addDays(mon, i), k = key(d), t = typeOf(state, d.getDay());
+      var d = addDays(mon, i), k = key(d);
       h += '<div class="daycol' + (sameDay(d, today) ? " today" : "") + '">';
-      h += '<div class="dlabel">' + DLABEL[d.getDay()] + '</div>';
-      h += '<div class="dtype">' + (t === "repos" ? "—" : TYPESHORT[t]) + '</div><div class="marks">';
+      h += '<div class="dlabel">' + DLABEL[d.getDay()] + '</div><div class="marks">';
       ["a", "b"].forEach(function (who) {
+        var t = typeOf(state, who, d.getDay());
+        if (t === "repos") { h += '<div class="mark repos"></div>'; return; }
         var st = entry(state, k, who).status, cls = "";
         if (st === "fait") cls = who === "a" ? "fait-a" : "fait-b";
         else if (st === "joker") cls = "joker";
@@ -628,7 +665,8 @@ var ROW_ID       = "adelie-alex-64";    // ex. "adelie-alex-7fq2" (inventez-le)
 
     h += '<div class="board"><div class="board-top"><div>';
     h += '<div class="eyebrow">Course à deux<span class="syncdot' + (online ? "" : " off") + '" id="syncdot"></span></div>';
-    h += '<div style="font-size:12px;color:rgba(255,255,255,0.5)">' + activeDays(state) + ' jours sur 7, depuis le début</div></div>';
+    h += '<div style="font-size:12px;color:rgba(255,255,255,0.5)">' +
+         activeDays(state, "a") + ' et ' + activeDays(state, "b") + ' jours par semaine</div></div>';
     h += '<div class="cagnotte"><div class="eyebrow">Cagnotte</div><div class="num">' +
          ((ta + tb) * 0.1).toFixed(2).replace(".", ",") + ' €</div></div></div><div class="scores">';
     h += '<div class="score"><div class="score-name">' + esc(state.names.a) + '</div><div class="num" id="ta">' + ta + '</div><div class="score-sub">points</div></div>';
@@ -637,15 +675,14 @@ var ROW_ID       = "adelie-alex-64";    // ex. "adelie-alex-7fq2" (inventez-le)
 
     h += '<div class="daynav"><button class="arrow" data-nav="-1" aria-label="Jour précédent">‹</button>';
     h += '<div style="text-align:center"><h2>' + prettyDate(viewDate) + '</h2><div class="daytype">' +
-         TYPELONG[typeOf(state, viewDate.getDay())] +
-         '</div></div>';
+         JOURS[viewDate.getDay()] + '</div></div>';
     h += '<button class="arrow" data-nav="1" aria-label="Jour suivant"' + (isFuture ? " disabled" : "") + '>›</button></div>';
 
     h += personCard("a") + personCard("b");
 
-    var tgt = activeDays(state);
-    h += '<div class="sec-title"><span>La semaine</span><span>' + weekDone(state, "a", viewDate) + '/' + tgt +
-         ' · ' + weekDone(state, "b", viewDate) + '/' + tgt + '</span></div>';
+    h += '<div class="sec-title"><span>La semaine</span><span>' +
+         weekDone(state, "a", viewDate) + '/' + activeDays(state, "a") + ' · ' +
+         weekDone(state, "b", viewDate) + '/' + activeDays(state, "b") + '</span></div>';
     h += weekStrip();
 
     h += '<div class="sec-title">Ce mois-ci</div><div class="grid2">';
@@ -666,16 +703,24 @@ var ROW_ID       = "adelie-alex-64";    // ex. "adelie-alex-7fq2" (inventez-le)
 
     h += '<div class="sec-title"><span>Vos jours</span><span style="text-transform:none;letter-spacing:0">Tapez pour changer</span></div>';
     h += '<div class="mini sched">';
+    h += '<div class="schedhead"><span></span>' +
+         '<span class="schedwho" style="color:var(--a)">' + esc(state.names.a) + '</span>' +
+         '<span class="schedwho" style="color:var(--b)">' + esc(state.names.b) + '</span></div>';
     [1, 2, 3, 4, 5, 6, 0].forEach(function (wd) {
-      var t = typeOf(state, wd);
-      h += '<button class="schedrow ' + t + '" data-sched="' + wd + '">' +
-           '<span class="schedday">' + DFULL[wd] + '</span>' +
-           '<span class="schedtype">' + TYPELONG[t] + '</span></button>';
+      h += '<div class="schedrow"><span class="schedday">' + DFULL[wd] + '</span>';
+      ["a", "b"].forEach(function (who) {
+        var t = typeOf(state, who, wd);
+        h += '<button class="schedtype ' + t + '" data-sched="' + who + ':' + wd + '" ' +
+             'aria-label="' + DFULL[wd] + ', ' + esc(state.names[who]) + ' : ' + TYPELONG[t] + '">' +
+             TYPESHORT[t] + '</button>';
+      });
+      h += '</div>';
     });
     h += '</div>';
-    h += '<div class="note">Chaque tap fait défiler course, récup active, repos. ' +
-         'Le bonus de semaine pleine s\'ajuste tout seul : il vaut ' + PTS_WEEK + ' points quand vous faites vos ' +
-         activeDays(state) + ' jours. Le calendrier est commun aux deux téléphones.</div>';
+    h += '<div class="note">Chaque tap fait défiler course, récup, repos. Vous pouvez avoir des jours différents : ' +
+         'le bonus de semaine pleine s\'ajuste à chacun, ' + PTS_WEEK + ' points quand la semaine est complète ' +
+         '(' + activeDays(state, "a") + ' jours pour ' + esc(state.names.a) + ', ' +
+         activeDays(state, "b") + ' pour ' + esc(state.names.b) + ').</div>';
 
     h += '<div class="sec-title"><span>Connexion</span><span style="text-transform:none;letter-spacing:0;color:' +
          (online ? "#3E8A6E" : "var(--bad)") + '">' + (online ? "synchronisée" : "coupée") + '</span></div>';
@@ -715,7 +760,7 @@ var ROW_ID       = "adelie-alex-64";    // ex. "adelie-alex-7fq2" (inventez-le)
     else if (t.dataset.bonus) { var q = t.dataset.bonus.split(":"); toggleBonus(q[0], q[1]); }
     else if (t.dataset.nav) { viewDate = addDays(viewDate, +t.dataset.nav); render(); }
     else if (t.dataset.ch) { toggleChallenge(t.dataset.ch); }
-    else if (t.dataset.sched) { cycleDay(+t.dataset.sched); }
+    else if (t.dataset.sched) { var sd = t.dataset.sched.split(":"); cycleDay(sd[0], +sd[1]); }
     else if (t.id === "diagbtn") { diagnose(); }
     else if (t.id === "reset") { resetAll(); }
   });
