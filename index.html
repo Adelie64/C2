@@ -132,6 +132,13 @@
   .schedrow:active { background: #F5F7F3; }
   .schedrow:focus-visible { outline: 2px solid var(--signal); outline-offset: -2px; }
 
+  #diag {
+    white-space: pre-wrap; word-break: break-word; margin: 10px 0 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px; line-height: 1.5; color: var(--ink);
+  }
+  #diag:empty { display: none; }
+
   .note { font-size: 11.5px; color: var(--muted); margin-top: 16px; padding: 0 2px; line-height: 1.5; }
   .reset { background: none; border: none; color: var(--muted); font-family: inherit; font-size: 11.5px; text-decoration: underline; cursor: pointer; padding: 0; }
 
@@ -244,22 +251,31 @@ var ROW_ID       = "adelie-alex-64";    // ex. "adelie-alex-7fq2" (inventez-le)
     return h;
   }
 
+  var lastError = "";
+
+  function checkResponse(r) {
+    if (r.ok) return r;
+    return r.text().then(function (t) {
+      throw new Error("HTTP " + r.status + (t ? " — " + t.slice(0, 200) : ""));
+    });
+  }
+
   function load() {
     if (!CONFIGURED) return Promise.resolve(cacheRead() || blank());
     var url = SUPABASE_URL.replace(/\/+$/, "") + "/rest/v1/" + TABLE +
               "?id=eq." + encodeURIComponent(ROW_ID) + "&select=data";
     return fetch(url, { headers: headers() })
-      .then(function (r) {
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        return r.json();
-      })
+      .then(checkResponse)
+      .then(function (r) { return r.json(); })
       .then(function (rows) {
         setOnline(true);
+        lastError = "";
         if (!rows || !rows.length) return cacheRead() || blank();
         return normalise(rows[0].data);
       })
-      .catch(function () {
+      .catch(function (e) {
         setOnline(false);
+        lastError = e.message || String(e);
         return cacheRead() || blank();
       });
   }
@@ -272,13 +288,66 @@ var ROW_ID       = "adelie-alex-64";    // ex. "adelie-alex-7fq2" (inventez-le)
       method: "POST",
       headers: headers({ "Prefer": "resolution=merge-duplicates,return=minimal" }),
       body: JSON.stringify({ id: ROW_ID, data: s, updated_at: new Date().toISOString() })
-    }).then(function (r) {
-      if (!r.ok) throw new Error("HTTP " + r.status);
+    }).then(checkResponse).then(function () {
       setOnline(true);
-    }).catch(function () {
+      lastError = "";
+    }).catch(function (e) {
       setOnline(false);
+      lastError = e.message || String(e);
       toast("Pas de réseau. Enregistré sur ce téléphone, envoyé plus tard.");
     });
+  }
+
+  /* ---------------- diagnostic ---------------- */
+
+  function hint(status, body) {
+    if (status === 404) {
+      return "La table est introuvable. Le bloc SQL n'a probablement pas été exécuté, " +
+             "ou la table ne s'appelle pas exactement « tableau ». " +
+             "Retourne dans SQL Editor et relance le bloc.";
+    }
+    if (status === 401 || status === 403) {
+      if (/row-level security|RLS|policy/i.test(body)) {
+        return "La table existe mais l'autorisation manque. C'est la partie « create policy » du bloc SQL " +
+               "qui n'est pas passée. Relance uniquement cette partie dans SQL Editor.";
+      }
+      return "La clé est refusée. Vérifie que tu as bien copié la clé publique en entier, sans espace " +
+             "avant ou après, et que ce n'est pas la clé secrète.";
+    }
+    if (status >= 500) return "Supabase répond mal. Vérifie sur ton tableau de bord que le projet n'est pas en pause.";
+    if (status === 200 || status === 206) return "La connexion fonctionne. Si la synchro coince encore, recharge la page sur les deux téléphones.";
+    return "Envoie-moi ce message tel quel, je regarde.";
+  }
+
+  function diagnose() {
+    var out = document.getElementById("diag");
+    if (!out) return;
+    out.textContent = "Test en cours…";
+
+    if (!CONFIGURED) {
+      out.textContent = "Les trois valeurs en haut du fichier ne sont pas remplies.";
+      return;
+    }
+    if (!/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(SUPABASE_URL.trim())) {
+      out.textContent = "L'adresse du projet a une forme inattendue :\n" + SUPABASE_URL +
+        "\n\nElle doit ressembler exactement à https://abcdxyz.supabase.co, sans rien après le .co";
+      return;
+    }
+
+    var url = SUPABASE_URL.replace(/\/+$/, "") + "/rest/v1/" + TABLE + "?select=id&limit=1";
+    fetch(url, { headers: headers() })
+      .then(function (r) {
+        return r.text().then(function (t) { return { status: r.status, body: t }; });
+      })
+      .then(function (res) {
+        out.textContent = "Code " + res.status + "\n" +
+          (res.body ? res.body.slice(0, 300) + "\n\n" : "\n") + hint(res.status, res.body);
+      })
+      .catch(function (e) {
+        out.textContent = "Aucune réponse du serveur.\n" + (e.message || e) +
+          "\n\nSoit l'adresse du projet est fausse, soit le téléphone n'a pas de connexion. " +
+          "Ouvre " + SUPABASE_URL + " dans un onglet : tu dois obtenir une page, pas une erreur.";
+      });
   }
 
   function setOnline(v) {
@@ -608,6 +677,13 @@ var ROW_ID       = "adelie-alex-64";    // ex. "adelie-alex-7fq2" (inventez-le)
          'Le bonus de semaine pleine s\'ajuste tout seul : il vaut ' + PTS_WEEK + ' points quand vous faites vos ' +
          activeDays(state) + ' jours. Le calendrier est commun aux deux téléphones.</div>';
 
+    h += '<div class="sec-title"><span>Connexion</span><span style="text-transform:none;letter-spacing:0;color:' +
+         (online ? "#3E8A6E" : "var(--bad)") + '">' + (online ? "synchronisée" : "coupée") + '</span></div>';
+    h += '<div class="mini">';
+    h += '<button class="chip" id="diagbtn" style="width:100%">Tester la connexion</button>';
+    h += '<pre id="diag">' + (lastError ? esc("Dernière erreur : " + lastError) : "") + '</pre>';
+    h += '</div>';
+
     h += '<div class="note">Barème : 10 points le jour fait, ' + PTS_MISS + ' le jour raté sans joker, 0 pour un joker ou une dispense. ' +
          '15 points pour une semaine pleine. 1 point = 10 centimes dans la cagnotte. ' +
          'Malade ou blessée : prenez « dispense », ça ne coûte rien et ça ne casse pas la série.</div>';
@@ -640,6 +716,7 @@ var ROW_ID       = "adelie-alex-64";    // ex. "adelie-alex-7fq2" (inventez-le)
     else if (t.dataset.nav) { viewDate = addDays(viewDate, +t.dataset.nav); render(); }
     else if (t.dataset.ch) { toggleChallenge(t.dataset.ch); }
     else if (t.dataset.sched) { cycleDay(+t.dataset.sched); }
+    else if (t.id === "diagbtn") { diagnose(); }
     else if (t.id === "reset") { resetAll(); }
   });
 
